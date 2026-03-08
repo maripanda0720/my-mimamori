@@ -4,6 +4,13 @@ import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged }
 import { getFirestore, doc, setDoc, onSnapshot, serverTimestamp, deleteDoc, collection } from 'firebase/firestore';
 import { Heart, Cat, Share2, Calendar, Bell, CheckCircle, AlertTriangle, Info, Plus, Users, Trash2, X, RefreshCw, Copy } from 'lucide-react';
 
+/**
+ * 【注意】Vercel Analyticsを有効にするには、実際の環境（VS Code等）で 
+ * `npm install @vercel/analytics` を実行し、以下のコメントアウトを解除してください。
+ * プレビュー環境の制限により、ここではインポートを一時的に除外しています。
+ */
+// import { Analytics } from "@vercel/analytics/react";
+
 // --- Firebase 設定 ---
 const firebaseConfig = (() => {
   if (typeof __firebase_config !== 'undefined' && __firebase_config) {
@@ -40,7 +47,8 @@ const App = () => {
   const [toast, setToast] = useState(null);
   const [showReminder, setShowReminder] = useState(false);
 
-  const HOURS_1 = 1 * 60 * 60 * 1000;
+  // 【テスト用】判定時間を1時間（1 * 60 * 60 * 1000 ミリ秒）に設定
+  const ALERT_THRESHOLD = 1 * 60 * 60 * 1000; 
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
@@ -62,6 +70,7 @@ const App = () => {
     }
   };
 
+  // 1. 認証の初期化
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -82,6 +91,7 @@ const App = () => {
     return () => unsubscribe();
   }, []);
 
+  // 2. 自分の状態監視
   useEffect(() => {
     if (!user || !db) return;
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'status', user.uid);
@@ -91,22 +101,23 @@ const App = () => {
         setSafetyData(data);
         if (data.name) setUserName(prev => (prev === '' ? data.name : prev));
         
-        // 24時間以上経過チェック
+        // 判定時間以上経過チェック（自分用）
         if (data.lastCheckIn) {
           const lastDate = data.lastCheckIn.toDate ? data.lastCheckIn.toDate() : new Date(data.lastCheckIn);
-          if (Date.now() - lastDate.getTime() > HOURS_1) {
+          if (Date.now() - lastDate.getTime() > ALERT_THRESHOLD) {
             setShowReminder(true);
           } else {
             setShowReminder(false);
           }
         }
       } else {
-        setShowReminder(true); // 初回利用時も出す
+        setShowReminder(true); 
       }
-    });
+    }, (err) => console.error(err));
     return () => unsubscribe();
   }, [user]);
 
+  // 3. 見守りリスト監視
   useEffect(() => {
     if (!user || !db || (view !== 'watch' && view !== 'add')) return;
     const followingCol = collection(db, 'artifacts', appId, 'users', user.uid, 'following');
@@ -115,9 +126,10 @@ const App = () => {
 
     const sortAndSetList = (currentMap) => {
       const list = Object.values(currentMap).filter(item => item !== null);
+      // 【並び順】連絡が古い順（時間が経過している人を上）に変更
       list.sort((a, b) => {
         const getTs = (t) => t?.lastCheckIn?.toDate ? t.lastCheckIn.toDate().getTime() : 0;
-        return getTs(b) - getTs(a);
+        return getTs(a) - getTs(b);
       });
       setWatchingList(list);
     };
@@ -137,11 +149,11 @@ const App = () => {
           statusListeners[id] = onSnapshot(targetDocRef, (sDoc) => {
             statusMap[id] = sDoc.exists() ? sDoc.data() : { uid: id, name: '未登録', isPending: true };
             sortAndSetList(statusMap);
-          });
+          }, (err) => console.error(err));
         }
       });
       if (newIds.length === 0) setWatchingList([]);
-    });
+    }, (err) => console.error(err));
     return () => {
       unsubscribeFollowing();
       Object.values(statusListeners).forEach(unsub => unsub());
@@ -175,9 +187,9 @@ const App = () => {
     const date = target.lastCheckIn.toDate ? target.lastCheckIn.toDate() : new Date(target.lastCheckIn);
     const diff = Date.now() - date.getTime();
     
-    // 24時間過ぎたら赤字にする
-    if (diff > HOURS_1) {
-      return { label: '未報告', color: 'text-rose-500', bg: 'bg-rose-50', icon: <Bell size={18} className="animate-pulse" /> };
+    // 【判定】指定時間を過ぎたら赤字＆ラベル変更
+    if (diff > ALERT_THRESHOLD) {
+      return { label: '連絡が来ていません', color: 'text-rose-500', bg: 'bg-rose-50', icon: <Bell size={18} className="animate-pulse" /> };
     }
     
     return { label: '元気です', color: 'text-emerald-500', bg: 'bg-emerald-50', icon: <CheckCircle size={18} /> };
@@ -194,15 +206,15 @@ const App = () => {
         </div>
       )}
 
-      {/* 24時間経過ポップアップ案内 */}
+      {/* ポップアップ案内（猫アイコン） */}
       {view === 'report' && showReminder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-900/40 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white w-full max-w-xs rounded-[2.5rem] p-8 text-center shadow-2xl animate-in zoom-in-95 duration-300">
             <div className="w-20 h-20 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-6">
               <Cat className="text-rose-500 w-10 h-10" />
             </div>
-            <h2 className="text-lg font-black text-slate-900 mb-2">おひさしぶり！</h2>
-            <p className="text-xs text-slate-500 font-bold mb-8 leading-relaxed">最後に報告してから24時間が経ちました。みんなに元気を知らせましょう！</p>
+            <h2 className="text-lg font-black text-slate-900 mb-2">元気を知らせよう！</h2>
+            <p className="text-xs text-slate-500 font-bold mb-8 leading-relaxed">最後に報告してから1時間以上が経ちました。みんなを安心させてあげてね。</p>
             <button onClick={() => setShowReminder(false)} className="w-full bg-rose-500 text-white py-4 rounded-2xl font-black text-sm shadow-xl shadow-rose-100 active:scale-95 transition-all">わかった！</button>
           </div>
         </div>
@@ -222,8 +234,9 @@ const App = () => {
                 <input type="text" placeholder="名前を入力" value={userName} onChange={(e) => setUserName(e.target.value)} className="w-full text-center text-xl font-bold bg-slate-50 border-none rounded-2xl py-4 focus:ring-2 focus:ring-indigo-500 outline-none" />
               </div>
               
+              {/* 報告ボタン（ハートアイコン） */}
               <button onClick={handleReport} className="group w-44 h-44 mx-auto flex flex-col items-center justify-center bg-indigo-600 text-white rounded-full shadow-2xl active:scale-95 transition-all border-8 border-indigo-50 relative">
-                <Cat className="w-16 h-16 fill-white mb-2" />
+                <Heart className="w-16 h-16 fill-white mb-2" />
                 <span className="font-black text-lg">元気です！</span>
                 {showReminder && <span className="absolute -top-2 -right-2 bg-rose-500 text-white text-[10px] px-3 py-1 rounded-full animate-bounce font-black">報告してね！</span>}
               </button>
@@ -258,19 +271,23 @@ const App = () => {
                     <div className="flex items-center gap-3 overflow-hidden flex-1">
                       <div className={`w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 ${getStatus(t).bg} ${getStatus(t).color}`}>{getStatus(t).icon}</div>
                       <div className="min-w-0">
-                        <p className={`text-sm font-black truncate ${getStatus(t).label === '未報告' ? 'text-rose-600' : 'text-slate-800'}`}>{t.name || '名前なし'}</p>
+                        {/* 判定時間を過ぎている場合は名前も赤文字に */}
+                        <p className={`text-sm font-black truncate ${getStatus(t).label === '連絡が来ていません' ? 'text-rose-600' : 'text-slate-800'}`}>{t.name || '名前なし'}</p>
                         <div className="flex items-center gap-2 mt-0.5">
                           <p className={`text-[10px] font-bold ${getStatus(t).color}`}>{getStatus(t).label}</p>
                           <span className="text-slate-200 text-[10px]">|</span>
-                          <p className={`text-[10px] font-mono font-bold truncate ${getStatus(t).label === '未報告' ? 'text-rose-400' : 'text-slate-400'}`}>{formatTimestamp(t.lastCheckIn)}</p>
+                          <p className={`text-[10px] font-mono font-bold truncate ${getStatus(t).label === '連絡が来ていません' ? 'text-rose-400' : 'text-slate-400'}`}>{formatTimestamp(t.lastCheckIn)}</p>
                         </div>
                       </div>
                     </div>
+                    {/* ゴミ箱の削除ボタン */}
                     <button onClick={async () => {
                       if (!user) return;
                       await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'following', t.uid));
-                      showToast("削除しました");
-                    }} className="p-2 text-slate-200 hover:text-rose-400 transition-colors"><Trash2 size={16} /></button>
+                      showToast("解除しました");
+                    }} className="p-2 text-slate-200 hover:text-rose-400 transition-colors">
+                      <Trash2 size={18} />
+                    </button>
                   </div>
                 ))}
               </div>
@@ -306,6 +323,8 @@ const App = () => {
           <span className="text-[9px] font-black mt-1 uppercase">List</span>
         </button>
       </nav>
+      {/* Vercel解析用コンポーネント（実際にはインポートが必要です） */}
+      {/* <Analytics /> */}
     </div>
   );
 };
