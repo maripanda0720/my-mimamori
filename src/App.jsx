@@ -40,7 +40,7 @@ const App = () => {
   const [toast, setToast] = useState(null);
   const [showReminder, setShowReminder] = useState(false);
 
-  const HOURS_24 = 24 * 60 * 60 * 1000;
+  const HOURS_1 = 1 * 60 * 60 * 1000;
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
@@ -94,7 +94,7 @@ const App = () => {
         // 24時間以上経過チェック
         if (data.lastCheckIn) {
           const lastDate = data.lastCheckIn.toDate ? data.lastCheckIn.toDate() : new Date(data.lastCheckIn);
-          if (Date.now() - lastDate.getTime() > HOURS_24) {
+          if (Date.now() - lastDate.getTime() > HOURS_1) {
             setShowReminder(true);
           } else {
             setShowReminder(false);
@@ -176,7 +176,7 @@ const App = () => {
     const diff = Date.now() - date.getTime();
     
     // 24時間過ぎたら赤字にする
-    if (diff > HOURS_24) {
+    if (diff > HOURS_1) {
       return { label: '未報告', color: 'text-rose-500', bg: 'bg-rose-50', icon: <Bell size={18} className="animate-pulse" /> };
     }
     
