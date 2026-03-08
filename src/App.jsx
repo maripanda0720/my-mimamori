@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot, serverTimestamp, deleteDoc, collection } from 'firebase/firestore';
-import { Heart, ShieldCheck, Share2, Calendar, Bell, CheckCircle, AlertTriangle, Info, Plus, Users, Trash2, X, RefreshCw, Copy } from 'lucide-react';
+import { Heart, Cat, Share2, Calendar, Bell, CheckCircle, AlertTriangle, Info, Plus, Users, Trash2, X, RefreshCw, Copy } from 'lucide-react';
 
 // --- Firebase 設定 ---
 const firebaseConfig = (() => {
@@ -38,9 +38,9 @@ const App = () => {
   const [watchingList, setWatchingList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
+  const [showReminder, setShowReminder] = useState(false);
 
   const HOURS_24 = 24 * 60 * 60 * 1000;
-  const HOURS_48 = 48 * 60 * 60 * 1000;
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
@@ -90,6 +90,18 @@ const App = () => {
         const data = docSnap.data();
         setSafetyData(data);
         if (data.name) setUserName(prev => (prev === '' ? data.name : prev));
+        
+        // 24時間以上経過チェック
+        if (data.lastCheckIn) {
+          const lastDate = data.lastCheckIn.toDate ? data.lastCheckIn.toDate() : new Date(data.lastCheckIn);
+          if (Date.now() - lastDate.getTime() > HOURS_24) {
+            setShowReminder(true);
+          } else {
+            setShowReminder(false);
+          }
+        }
+      } else {
+        setShowReminder(true); // 初回利用時も出す
       }
     });
     return () => unsubscribe();
@@ -145,7 +157,8 @@ const App = () => {
         name: userName || '匿名ユーザー',
         lastCheckIn: serverTimestamp(),
       }, { merge: true });
-      showToast("「元気です！」を報告しました");
+      showToast("報告しました！");
+      setShowReminder(false);
     } catch (err) {
       showToast("報告に失敗しました", "error");
     }
@@ -161,23 +174,42 @@ const App = () => {
     if (!target || target.isPending || !target.lastCheckIn) return { label: '未確認', color: 'text-slate-400', bg: 'bg-slate-100', icon: <Info size={18} /> };
     const date = target.lastCheckIn.toDate ? target.lastCheckIn.toDate() : new Date(target.lastCheckIn);
     const diff = Date.now() - date.getTime();
-    if (diff < HOURS_24) return { label: '良好', color: 'text-emerald-500', bg: 'bg-emerald-50', icon: <CheckCircle size={18} /> };
-    if (diff < HOURS_48) return { label: '注意', color: 'text-amber-500', bg: 'bg-amber-50', icon: <AlertTriangle size={18} /> };
-    return { label: '警告', color: 'text-rose-500', bg: 'bg-rose-50', icon: <Bell size={18} className="animate-pulse" /> };
+    
+    // 24時間過ぎたら赤字にする
+    if (diff > HOURS_24) {
+      return { label: '未報告', color: 'text-rose-500', bg: 'bg-rose-50', icon: <Bell size={18} className="animate-pulse" /> };
+    }
+    
+    return { label: '元気です', color: 'text-emerald-500', bg: 'bg-emerald-50', icon: <CheckCircle size={18} /> };
   };
 
   if (loading) return <div className="flex h-screen items-center justify-center bg-white font-bold text-slate-400 uppercase text-xs tracking-widest">Loading...</div>;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-28">
+      {/* 通知トースト */}
       {toast && (
         <div className={`fixed top-6 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-full shadow-2xl text-white font-bold text-xs transition-all ${toast.type === 'error' ? 'bg-rose-500' : 'bg-indigo-600'}`}>
           {toast.msg}
         </div>
       )}
 
+      {/* 24時間経過ポップアップ案内 */}
+      {view === 'report' && showReminder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-900/40 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white w-full max-w-xs rounded-[2.5rem] p-8 text-center shadow-2xl animate-in zoom-in-95 duration-300">
+            <div className="w-20 h-20 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-6">
+              <Cat className="text-rose-500 w-10 h-10" />
+            </div>
+            <h2 className="text-lg font-black text-slate-900 mb-2">おひさしぶり！</h2>
+            <p className="text-xs text-slate-500 font-bold mb-8 leading-relaxed">最後に報告してから24時間が経ちました。みんなに元気を知らせましょう！</p>
+            <button onClick={() => setShowReminder(false)} className="w-full bg-rose-500 text-white py-4 rounded-2xl font-black text-sm shadow-xl shadow-rose-100 active:scale-95 transition-all">わかった！</button>
+          </div>
+        </div>
+      )}
+
       <header className="bg-white px-6 py-6 text-center border-b border-slate-100 sticky top-0 z-30 shadow-sm flex items-center justify-center gap-2">
-        <ShieldCheck className="text-indigo-600" size={24} />
+        <Cat className="text-indigo-600" size={24} />
         <h1 className="text-lg font-black tracking-tighter text-slate-900 uppercase">みまもり。</h1>
       </header>
 
@@ -189,10 +221,13 @@ const App = () => {
                 <label className="text-[10px] font-black text-slate-300 uppercase tracking-widest block mb-2 px-1">Display Name</label>
                 <input type="text" placeholder="名前を入力" value={userName} onChange={(e) => setUserName(e.target.value)} className="w-full text-center text-xl font-bold bg-slate-50 border-none rounded-2xl py-4 focus:ring-2 focus:ring-indigo-500 outline-none" />
               </div>
-              <button onClick={handleReport} className="group w-44 h-44 mx-auto flex flex-col items-center justify-center bg-indigo-600 text-white rounded-full shadow-2xl active:scale-95 transition-all border-8 border-indigo-50">
-                <Heart className="w-16 h-16 fill-white mb-2" />
+              
+              <button onClick={handleReport} className="group w-44 h-44 mx-auto flex flex-col items-center justify-center bg-indigo-600 text-white rounded-full shadow-2xl active:scale-95 transition-all border-8 border-indigo-50 relative">
+                <Cat className="w-16 h-16 fill-white mb-2" />
                 <span className="font-black text-lg">元気です！</span>
+                {showReminder && <span className="absolute -top-2 -right-2 bg-rose-500 text-white text-[10px] px-3 py-1 rounded-full animate-bounce font-black">報告してね！</span>}
               </button>
+
               <div className="mt-8 bg-slate-50 rounded-2xl p-4 border border-slate-100 flex flex-col items-center">
                 <p className="text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-widest">Last Update</p>
                 <p className="text-sm font-black text-slate-700 font-mono">{formatTimestamp(safetyData?.lastCheckIn)}</p>
@@ -223,15 +258,16 @@ const App = () => {
                     <div className="flex items-center gap-3 overflow-hidden flex-1">
                       <div className={`w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 ${getStatus(t).bg} ${getStatus(t).color}`}>{getStatus(t).icon}</div>
                       <div className="min-w-0">
-                        <p className="text-sm font-black text-slate-800 truncate">{t.name || '名前なし'}</p>
+                        <p className={`text-sm font-black truncate ${getStatus(t).label === '未報告' ? 'text-rose-600' : 'text-slate-800'}`}>{t.name || '名前なし'}</p>
                         <div className="flex items-center gap-2 mt-0.5">
                           <p className={`text-[10px] font-bold ${getStatus(t).color}`}>{getStatus(t).label}</p>
                           <span className="text-slate-200 text-[10px]">|</span>
-                          <p className="text-[10px] font-mono font-bold text-slate-400 truncate">{formatTimestamp(t.lastCheckIn)}</p>
+                          <p className={`text-[10px] font-mono font-bold truncate ${getStatus(t).label === '未報告' ? 'text-rose-400' : 'text-slate-400'}`}>{formatTimestamp(t.lastCheckIn)}</p>
                         </div>
                       </div>
                     </div>
                     <button onClick={async () => {
+                      if (!user) return;
                       await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'following', t.uid));
                       showToast("削除しました");
                     }} className="p-2 text-slate-200 hover:text-rose-400 transition-colors"><Trash2 size={16} /></button>
@@ -249,7 +285,7 @@ const App = () => {
               <h3 className="font-black text-slate-800 flex items-center gap-2 mb-6"><Plus size={18} className="text-indigo-600" /> IDを登録する</h3>
               <input type="text" placeholder="IDをペースト" value={targetId} onChange={(e) => setTargetId(e.target.value)} className="w-full bg-slate-50 border-2 border-transparent focus:border-indigo-100 rounded-2xl px-5 py-4 text-[10px] font-mono outline-none mb-6 shadow-inner" />
               <button onClick={async () => {
-                if (!targetId.trim()) return;
+                if (!targetId.trim() || !user) return;
                 await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'following', targetId.trim()), { addedAt: serverTimestamp() });
                 setTargetId('');
                 setView('watch');
