@@ -52,7 +52,7 @@ const App = () => {
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
+    setTimeout(() => setToast(null), 4000);
   };
 
   const copyToClipboard = (text) => {
@@ -72,14 +72,29 @@ const App = () => {
 
   // 通知許可のリクエスト
   const requestPermission = async () => {
+    // iPhoneのブラウザそのままの状態（PWAでない状態）でのチェック
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    const isStandalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
+
     if (!("Notification" in window)) {
-      showToast("このブラウザは通知に対応していません", "error");
+      if (isIOS && !isStandalone) {
+        showToast("iPhoneは「ホーム画面に追加」すると通知が使えます！", "error");
+      } else {
+        showToast("このブラウザは通知に対応していません", "error");
+      }
       return;
     }
-    const permission = await Notification.requestPermission();
-    setNotificationPermission(permission);
-    if (permission === 'granted') {
-      showToast("通知が有効になりました！");
+
+    try {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+      if (permission === 'granted') {
+        showToast("通知が有効になりました！");
+      } else {
+        showToast("通知が拒否されました。設定を確認してください。", "error");
+      }
+    } catch (e) {
+      showToast("通知の設定中にエラーが発生しました", "error");
     }
   };
 
@@ -141,7 +156,7 @@ const App = () => {
 
     const sortAndSetList = (currentMap) => {
       const list = Object.values(currentMap).filter(item => item !== null);
-      // 【並び順】連絡が古い順（時間が経過している人を上）に変更
+      // 【並び順】連絡が古い順（時間が経過している人を上）
       list.sort((a, b) => {
         const getTs = (t) => t?.lastCheckIn?.toDate ? t.lastCheckIn.toDate().getTime() : 0;
         return getTs(a) - getTs(b);
@@ -166,7 +181,7 @@ const App = () => {
             const newData = sDoc.exists() ? sDoc.data() : { uid: id, name: '未登録', isPending: true };
             statusMap[id] = newData;
 
-            // ステータスが変わった時の通知テスト
+            // ステータスが変わった時の通知
             if (prevStatus && !prevStatus.isPending && sDoc.exists()) {
               const lastDate = newData.lastCheckIn?.toDate ? newData.lastCheckIn.toDate() : new Date(newData.lastCheckIn);
               if (Date.now() - lastDate.getTime() > ALERT_THRESHOLD && Notification.permission === 'granted') {
@@ -230,12 +245,12 @@ const App = () => {
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-28">
       {/* 通知トースト */}
       {toast && (
-        <div className={`fixed top-6 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-full shadow-2xl text-white font-bold text-xs transition-all ${toast.type === 'error' ? 'bg-rose-500' : 'bg-indigo-600'}`}>
+        <div className={`fixed top-6 left-1/2 -translate-x-1/2 z-50 px-6 py-4 rounded-3xl shadow-2xl text-white font-bold text-xs transition-all w-[80%] max-w-xs text-center ${toast.type === 'error' ? 'bg-rose-500' : 'bg-indigo-600'}`}>
           {toast.msg}
         </div>
       )}
 
-      {/* ポップアップ案内 */}
+      {/* 判定時間超過ポップアップ */}
       {view === 'report' && showReminder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-900/40 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white w-full max-w-xs rounded-[2.5rem] p-8 text-center shadow-2xl animate-in zoom-in-95 duration-300">
@@ -257,7 +272,7 @@ const App = () => {
       <main className="max-w-md mx-auto p-4">
         {view === 'report' && (
           <div className="space-y-6 animate-in fade-in duration-300">
-            {/* 通知設定カード */}
+            {/* 通知設定カード（改善版） */}
             {notificationPermission !== 'granted' && (
               <section className="bg-indigo-50 rounded-3xl p-6 border border-indigo-100 flex items-center gap-4">
                 <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-indigo-600 shadow-sm">
@@ -285,7 +300,7 @@ const App = () => {
               <button onClick={handleReport} className="group w-44 h-44 mx-auto flex flex-col items-center justify-center bg-indigo-600 text-white rounded-full shadow-2xl active:scale-95 transition-all border-8 border-indigo-50 relative">
                 <Heart className="w-16 h-16 fill-white mb-2" />
                 <span className="font-black text-lg">元気です！</span>
-                {showReminder && <span className="absolute -top-2 -right-2 bg-rose-500 text-white text-[10px] px-3 py-1 rounded-full animate-bounce font-black">報告してね！</span>}
+                {showReminder && <span className="absolute -top-2 -right-2 bg-rose-500 text-white text-[10px] px-3 py-1 rounded-full animate-bounce font-black shadow-lg">報告してね！</span>}
               </button>
 
               <div className="mt-8 bg-slate-50 rounded-2xl p-4 border border-slate-100 flex flex-col items-center">
@@ -369,7 +384,7 @@ const App = () => {
           <span className="text-[9px] font-black mt-1 uppercase">List</span>
         </button>
       </nav>
-      {/* Vercel解析用コンポーネント */}
+      {/* Analytics（実際にはインストールが必要です） */}
       {/* <Analytics /> */}
     </div>
   );
