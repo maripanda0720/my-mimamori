@@ -2,12 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot, serverTimestamp, deleteDoc, collection } from 'firebase/firestore';
-import { Heart, Cat, Share2, Calendar, Bell, CheckCircle, AlertTriangle, Info, Plus, Users, Trash2, X, RefreshCw, Copy } from 'lucide-react';
+import { Heart, Cat, Share2, Calendar, Bell, CheckCircle, AlertTriangle, Info, Plus, Users, Trash2, X, RefreshCw, Copy, BellRing } from 'lucide-react';
 
 /**
  * 【注意】Vercel Analyticsを有効にするには、実際の環境（VS Code等）で 
  * `npm install @vercel/analytics` を実行し、以下のコメントアウトを解除してください。
- * プレビュー環境の制限により、ここではインポートを一時的に除外しています。
  */
 // import { Analytics } from "@vercel/analytics/react";
 
@@ -46,6 +45,7 @@ const App = () => {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
   const [showReminder, setShowReminder] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState('default');
 
   // 【テスト用】判定時間を1時間（1 * 60 * 60 * 1000 ミリ秒）に設定
   const ALERT_THRESHOLD = 1 * 60 * 60 * 1000; 
@@ -70,6 +70,19 @@ const App = () => {
     }
   };
 
+  // 通知許可のリクエスト
+  const requestPermission = async () => {
+    if (!("Notification" in window)) {
+      showToast("このブラウザは通知に対応していません", "error");
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    setNotificationPermission(permission);
+    if (permission === 'granted') {
+      showToast("通知が有効になりました！");
+    }
+  };
+
   // 1. 認証の初期化
   useEffect(() => {
     const initAuth = async () => {
@@ -84,6 +97,9 @@ const App = () => {
       }
     };
     initAuth();
+    if ("Notification" in window) {
+      setNotificationPermission(Notification.permission);
+    }
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
       setLoading(false);
@@ -101,7 +117,6 @@ const App = () => {
         setSafetyData(data);
         if (data.name) setUserName(prev => (prev === '' ? data.name : prev));
         
-        // 判定時間以上経過チェック（自分用）
         if (data.lastCheckIn) {
           const lastDate = data.lastCheckIn.toDate ? data.lastCheckIn.toDate() : new Date(data.lastCheckIn);
           if (Date.now() - lastDate.getTime() > ALERT_THRESHOLD) {
@@ -117,7 +132,7 @@ const App = () => {
     return () => unsubscribe();
   }, [user]);
 
-  // 3. 見守りリスト監視
+  // 3. 見守りリスト監視 & ローカル通知
   useEffect(() => {
     if (!user || !db || (view !== 'watch' && view !== 'add')) return;
     const followingCol = collection(db, 'artifacts', appId, 'users', user.uid, 'following');
@@ -147,13 +162,28 @@ const App = () => {
         if (!statusListeners[id]) {
           const targetDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'status', id);
           statusListeners[id] = onSnapshot(targetDocRef, (sDoc) => {
-            statusMap[id] = sDoc.exists() ? sDoc.data() : { uid: id, name: '未登録', isPending: true };
+            const prevStatus = statusMap[id];
+            const newData = sDoc.exists() ? sDoc.data() : { uid: id, name: '未登録', isPending: true };
+            statusMap[id] = newData;
+
+            // ステータスが変わった時の通知テスト
+            if (prevStatus && !prevStatus.isPending && sDoc.exists()) {
+              const lastDate = newData.lastCheckIn?.toDate ? newData.lastCheckIn.toDate() : new Date(newData.lastCheckIn);
+              if (Date.now() - lastDate.getTime() > ALERT_THRESHOLD && Notification.permission === 'granted') {
+                new Notification("みまもり。からのお知らせ", {
+                  body: `${newData.name || '名前なし'}さんから連絡が来ていません`,
+                  icon: "/apple-touch-icon.png"
+                });
+              }
+            }
+            
             sortAndSetList(statusMap);
           }, (err) => console.error(err));
         }
       });
       if (newIds.length === 0) setWatchingList([]);
     }, (err) => console.error(err));
+
     return () => {
       unsubscribeFollowing();
       Object.values(statusListeners).forEach(unsub => unsub());
@@ -187,7 +217,6 @@ const App = () => {
     const date = target.lastCheckIn.toDate ? target.lastCheckIn.toDate() : new Date(target.lastCheckIn);
     const diff = Date.now() - date.getTime();
     
-    // 【判定】指定時間を過ぎたら赤字＆ラベル変更
     if (diff > ALERT_THRESHOLD) {
       return { label: '連絡が来ていません', color: 'text-rose-500', bg: 'bg-rose-50', icon: <Bell size={18} className="animate-pulse" /> };
     }
@@ -206,7 +235,7 @@ const App = () => {
         </div>
       )}
 
-      {/* ポップアップ案内（猫アイコン） */}
+      {/* ポップアップ案内 */}
       {view === 'report' && showReminder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-900/40 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white w-full max-w-xs rounded-[2.5rem] p-8 text-center shadow-2xl animate-in zoom-in-95 duration-300">
@@ -228,13 +257,31 @@ const App = () => {
       <main className="max-w-md mx-auto p-4">
         {view === 'report' && (
           <div className="space-y-6 animate-in fade-in duration-300">
+            {/* 通知設定カード */}
+            {notificationPermission !== 'granted' && (
+              <section className="bg-indigo-50 rounded-3xl p-6 border border-indigo-100 flex items-center gap-4">
+                <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-indigo-600 shadow-sm">
+                  <BellRing size={24} />
+                </div>
+                <div className="flex-1">
+                  <p className="text-xs font-black text-indigo-900 mb-1">通知を有効にしますか？</p>
+                  <p className="text-[10px] text-indigo-600 font-bold leading-tight">相手の異変にすぐ気づけるようになります。</p>
+                </div>
+                <button 
+                  onClick={requestPermission}
+                  className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-[10px] font-black shadow-lg active:scale-95 transition-all"
+                >
+                  有効にする
+                </button>
+              </section>
+            )}
+
             <section className="bg-white rounded-3xl p-8 shadow-xl border border-slate-100 text-center">
               <div className="mb-6 text-left">
                 <label className="text-[10px] font-black text-slate-300 uppercase tracking-widest block mb-2 px-1">Display Name</label>
                 <input type="text" placeholder="名前を入力" value={userName} onChange={(e) => setUserName(e.target.value)} className="w-full text-center text-xl font-bold bg-slate-50 border-none rounded-2xl py-4 focus:ring-2 focus:ring-indigo-500 outline-none" />
               </div>
               
-              {/* 報告ボタン（ハートアイコン） */}
               <button onClick={handleReport} className="group w-44 h-44 mx-auto flex flex-col items-center justify-center bg-indigo-600 text-white rounded-full shadow-2xl active:scale-95 transition-all border-8 border-indigo-50 relative">
                 <Heart className="w-16 h-16 fill-white mb-2" />
                 <span className="font-black text-lg">元気です！</span>
@@ -246,6 +293,7 @@ const App = () => {
                 <p className="text-sm font-black text-slate-700 font-mono">{formatTimestamp(safetyData?.lastCheckIn)}</p>
               </div>
             </section>
+            
             <section className="bg-white rounded-3xl p-6 shadow-md border border-slate-100">
               <p className="text-xs font-bold text-slate-400 mb-4 flex items-center gap-2"><Share2 size={14} /> あなたのID（共有用）</p>
               <div className="flex items-center gap-2 bg-slate-50 p-4 rounded-xl border border-dashed border-slate-200">
@@ -271,7 +319,6 @@ const App = () => {
                     <div className="flex items-center gap-3 overflow-hidden flex-1">
                       <div className={`w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 ${getStatus(t).bg} ${getStatus(t).color}`}>{getStatus(t).icon}</div>
                       <div className="min-w-0">
-                        {/* 判定時間を過ぎている場合は名前も赤文字に */}
                         <p className={`text-sm font-black truncate ${getStatus(t).label === '連絡が来ていません' ? 'text-rose-600' : 'text-slate-800'}`}>{t.name || '名前なし'}</p>
                         <div className="flex items-center gap-2 mt-0.5">
                           <p className={`text-[10px] font-bold ${getStatus(t).color}`}>{getStatus(t).label}</p>
@@ -280,7 +327,6 @@ const App = () => {
                         </div>
                       </div>
                     </div>
-                    {/* ゴミ箱の削除ボタン */}
                     <button onClick={async () => {
                       if (!user) return;
                       await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'following', t.uid));
@@ -323,7 +369,7 @@ const App = () => {
           <span className="text-[9px] font-black mt-1 uppercase">List</span>
         </button>
       </nav>
-      {/* Vercel解析用コンポーネント（実際にはインポートが必要です） */}
+      {/* Vercel解析用コンポーネント */}
       {/* <Analytics /> */}
     </div>
   );
