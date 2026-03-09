@@ -47,8 +47,8 @@ const App = () => {
   const [showReminder, setShowReminder] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState('default');
 
-  // 【テスト用】判定時間を1時間（1 * 60 * 60 * 1000 ミリ秒）に設定
-  const ALERT_THRESHOLD = 1 * 60 * 60 * 1000; 
+  // 【設定】24時間（24 * 60 * 60 * 1000 ミリ秒）
+  const ALERT_THRESHOLD = 24 * 60 * 60 * 1000; 
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
@@ -72,7 +72,6 @@ const App = () => {
 
   // 通知許可のリクエスト
   const requestPermission = async () => {
-    // iPhoneのブラウザそのままの状態（PWAでない状態）でのチェック
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
     const isStandalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
 
@@ -91,7 +90,7 @@ const App = () => {
       if (permission === 'granted') {
         showToast("通知が有効になりました！");
       } else {
-        showToast("通知が拒否されました。設定を確認してください。", "error");
+        showToast("通知がオフになっています。スマホの設定を確認してください。", "error");
       }
     } catch (e) {
       showToast("通知の設定中にエラーが発生しました", "error");
@@ -132,6 +131,7 @@ const App = () => {
         setSafetyData(data);
         if (data.name) setUserName(prev => (prev === '' ? data.name : prev));
         
+        // 24時間以上経過チェック
         if (data.lastCheckIn) {
           const lastDate = data.lastCheckIn.toDate ? data.lastCheckIn.toDate() : new Date(data.lastCheckIn);
           if (Date.now() - lastDate.getTime() > ALERT_THRESHOLD) {
@@ -147,7 +147,7 @@ const App = () => {
     return () => unsubscribe();
   }, [user]);
 
-  // 3. 見守りリスト監視 & ローカル通知
+  // 3. 見守りリスト監視 & 通知ロジック
   useEffect(() => {
     if (!user || !db || (view !== 'watch' && view !== 'add')) return;
     const followingCol = collection(db, 'artifacts', appId, 'users', user.uid, 'following');
@@ -177,16 +177,18 @@ const App = () => {
         if (!statusListeners[id]) {
           const targetDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'status', id);
           statusListeners[id] = onSnapshot(targetDocRef, (sDoc) => {
-            const prevStatus = statusMap[id];
+            const prevData = statusMap[id];
             const newData = sDoc.exists() ? sDoc.data() : { uid: id, name: '未登録', isPending: true };
             statusMap[id] = newData;
 
-            // ステータスが変わった時の通知
-            if (prevStatus && !prevStatus.isPending && sDoc.exists()) {
+            // 状態が変わって「連絡が来ていない」状態になった時にスマホ通知を送る
+            if (prevData && !prevData.isPending && sDoc.exists()) {
               const lastDate = newData.lastCheckIn?.toDate ? newData.lastCheckIn.toDate() : new Date(newData.lastCheckIn);
-              if (Date.now() - lastDate.getTime() > ALERT_THRESHOLD && Notification.permission === 'granted') {
-                new Notification("みまもり。からのお知らせ", {
-                  body: `${newData.name || '名前なし'}さんから連絡が来ていません`,
+              const isLate = Date.now() - lastDate.getTime() > ALERT_THRESHOLD;
+              
+              if (isLate && Notification.permission === 'granted') {
+                new Notification("みまもり。連絡アラート", {
+                  body: `${newData.name || '名前なし'}さんから24時間以上連絡がありません。`,
                   icon: "/apple-touch-icon.png"
                 });
               }
@@ -214,7 +216,7 @@ const App = () => {
         name: userName || '匿名ユーザー',
         lastCheckIn: serverTimestamp(),
       }, { merge: true });
-      showToast("報告しました！");
+      showToast("元気を報告しました！");
       setShowReminder(false);
     } catch (err) {
       showToast("報告に失敗しました", "error");
@@ -232,6 +234,7 @@ const App = () => {
     const date = target.lastCheckIn.toDate ? target.lastCheckIn.toDate() : new Date(target.lastCheckIn);
     const diff = Date.now() - date.getTime();
     
+    // 24時間判定
     if (diff > ALERT_THRESHOLD) {
       return { label: '連絡が来ていません', color: 'text-rose-500', bg: 'bg-rose-50', icon: <Bell size={18} className="animate-pulse" /> };
     }
@@ -245,20 +248,20 @@ const App = () => {
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-28">
       {/* 通知トースト */}
       {toast && (
-        <div className={`fixed top-6 left-1/2 -translate-x-1/2 z-50 px-6 py-4 rounded-3xl shadow-2xl text-white font-bold text-xs transition-all w-[80%] max-w-xs text-center ${toast.type === 'error' ? 'bg-rose-500' : 'bg-indigo-600'}`}>
+        <div className={`fixed top-6 left-1/2 -translate-x-1/2 z-50 px-6 py-4 rounded-3xl shadow-2xl text-white font-bold text-xs transition-all w-[80%] max-w-xs text-center animate-in fade-in slide-in-from-top-4 ${toast.type === 'error' ? 'bg-rose-500' : 'bg-indigo-600'}`}>
           {toast.msg}
         </div>
       )}
 
-      {/* 判定時間超過ポップアップ */}
+      {/* 24時間超過ポップアップ */}
       {view === 'report' && showReminder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-900/40 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white w-full max-w-xs rounded-[2.5rem] p-8 text-center shadow-2xl animate-in zoom-in-95 duration-300">
             <div className="w-20 h-20 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-6">
               <Cat className="text-rose-500 w-10 h-10" />
             </div>
-            <h2 className="text-lg font-black text-slate-900 mb-2">元気を知らせよう！</h2>
-            <p className="text-xs text-slate-500 font-bold mb-8 leading-relaxed">最後に報告してから1時間以上が経ちました。みんなを安心させてあげてね。</p>
+            <h2 className="text-lg font-black text-slate-900 mb-2">おひさしぶり！</h2>
+            <p className="text-xs text-slate-500 font-bold mb-8 leading-relaxed">最後に報告してから24時間が経ちました。みんなを安心させてあげてね。</p>
             <button onClick={() => setShowReminder(false)} className="w-full bg-rose-500 text-white py-4 rounded-2xl font-black text-sm shadow-xl shadow-rose-100 active:scale-95 transition-all">わかった！</button>
           </div>
         </div>
@@ -272,7 +275,7 @@ const App = () => {
       <main className="max-w-md mx-auto p-4">
         {view === 'report' && (
           <div className="space-y-6 animate-in fade-in duration-300">
-            {/* 通知設定カード（改善版） */}
+            {/* 通知設定カード */}
             {notificationPermission !== 'granted' && (
               <section className="bg-indigo-50 rounded-3xl p-6 border border-indigo-100 flex items-center gap-4">
                 <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-indigo-600 shadow-sm">
@@ -280,7 +283,7 @@ const App = () => {
                 </div>
                 <div className="flex-1">
                   <p className="text-xs font-black text-indigo-900 mb-1">通知を有効にしますか？</p>
-                  <p className="text-[10px] text-indigo-600 font-bold leading-tight">相手の異変にすぐ気づけるようになります。</p>
+                  <p className="text-[10px] text-indigo-600 font-bold leading-tight">iPhoneはホーム画面に追加して起動してください。</p>
                 </div>
                 <button 
                   onClick={requestPermission}
@@ -300,7 +303,7 @@ const App = () => {
               <button onClick={handleReport} className="group w-44 h-44 mx-auto flex flex-col items-center justify-center bg-indigo-600 text-white rounded-full shadow-2xl active:scale-95 transition-all border-8 border-indigo-50 relative">
                 <Heart className="w-16 h-16 fill-white mb-2" />
                 <span className="font-black text-lg">元気です！</span>
-                {showReminder && <span className="absolute -top-2 -right-2 bg-rose-500 text-white text-[10px] px-3 py-1 rounded-full animate-bounce font-black shadow-lg">報告してね！</span>}
+                {showReminder && <span className="absolute -top-2 -right-2 bg-rose-500 text-white text-[10px] px-3 py-1 rounded-full animate-bounce font-black shadow-lg">報告して！</span>}
               </button>
 
               <div className="mt-8 bg-slate-50 rounded-2xl p-4 border border-slate-100 flex flex-col items-center">
@@ -384,8 +387,6 @@ const App = () => {
           <span className="text-[9px] font-black mt-1 uppercase">List</span>
         </button>
       </nav>
-      {/* Analytics（実際にはインストールが必要です） */}
-      {/* <Analytics /> */}
     </div>
   );
 };
